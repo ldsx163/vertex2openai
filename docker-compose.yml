@@ -20,4 +20,6 @@ services:
       - FAKE_STREAMING_INTERVAL=1.0
       # Retry count for upstream 429 responses (default: 3, set 0 to disable)
       - UPSTREAM_429_RETRY_COUNT=3
+      # Fixed interval between upstream 429 retries (default: 1.0)
+      - UPSTREAM_429_RETRY_INTERVAL_SECONDS=1.0
     restart: unless-stopped

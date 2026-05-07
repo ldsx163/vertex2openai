@@ -124,24 +124,6 @@ def _get_upstream_status_code(exc: Exception) -> Optional[int]:
     return None
 
 
-def _get_retry_after_seconds(exc: Exception) -> Optional[float]:
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if not headers:
-        return None
-
-    retry_after = None
-    if hasattr(headers, "get"):
-        retry_after = headers.get("retry-after") or headers.get("Retry-After")
-    if retry_after is None:
-        return None
-
-    try:
-        return max(0.0, float(retry_after))
-    except (TypeError, ValueError):
-        return None
-
-
 def _is_upstream_429_error(exc: Exception) -> bool:
     status_code = _get_upstream_status_code(exc)
     if status_code == 429:
@@ -153,21 +135,12 @@ def _is_upstream_429_error(exc: Exception) -> bool:
     )
 
 
-def _get_429_retry_delay(exc: Exception, retry_number: int) -> float:
-    retry_after = _get_retry_after_seconds(exc)
-    max_delay = app_config.UPSTREAM_429_RETRY_MAX_DELAY_SECONDS
-    if retry_after is not None:
-        return min(retry_after, max_delay)
-
-    base_delay = app_config.UPSTREAM_429_RETRY_BASE_DELAY_SECONDS
-    return min(base_delay * (2 ** max(0, retry_number - 1)), max_delay)
-
-
 async def _sleep_before_429_retry(exc: Exception, retry_number: int, model_name: str) -> None:
-    delay = _get_429_retry_delay(exc, retry_number)
+    delay = app_config.UPSTREAM_429_RETRY_INTERVAL_SECONDS
     print(
         f"WARNING: Upstream 429 for Gemini model '{model_name}'. "
-        f"Retrying {retry_number}/{app_config.UPSTREAM_429_RETRY_COUNT} after {delay:.2f}s."
+        f"Retrying {retry_number}/{app_config.UPSTREAM_429_RETRY_COUNT} "
+        f"after fixed interval {delay:.2f}s."
     )
     if delay > 0:
         await asyncio.sleep(delay)

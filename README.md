@@ -83,6 +83,7 @@ API_KEY="your_secure_api_key_here" # REQUIRED: Set a strong key for security
 # FAKE_STREAMING="false"         # For debugging - simulate streaming
 # FAKE_STREAMING_INTERVAL="1.0"  # Interval for fake streaming keep-alives
 # UPSTREAM_429_RETRY_COUNT="3"   # Retries after an upstream 429 before returning an error; set 0 to disable
+# UPSTREAM_429_RETRY_INTERVAL_SECONDS="1.0" # Fixed interval between upstream 429 retries
 # GCP_PROJECT_ID="your-gcp-project-id" # Explicitly set GCP Project ID if needed
 # GCP_LOCATION="us-central1"          # Explicitly set GCP Location if needed
 ```
@@ -158,8 +159,7 @@ Managed in [`app/config.py`](app/config.py) and loaded from the environment:
 -   `FAKE_STREAMING`: Optional. Set to `"true"` to simulate streaming output for testing. (Default: `"false"`)
 -   `FAKE_STREAMING_INTERVAL`: Optional. Interval (seconds) for keep-alive messages during fake streaming. (Default: `1.0`)
 -   `UPSTREAM_429_RETRY_COUNT`: Optional. Number of retries after an upstream 429 before returning an error. (Default: `3`; set `0` to disable)
--   `UPSTREAM_429_RETRY_BASE_DELAY_SECONDS`: Optional. Initial delay for upstream 429 retries; retries use exponential backoff. (Default: `1.0`)
--   `UPSTREAM_429_RETRY_MAX_DELAY_SECONDS`: Optional. Maximum delay for upstream 429 retries. (Default: `30.0`)
+-   `UPSTREAM_429_RETRY_INTERVAL_SECONDS`: Optional. Fixed interval between upstream 429 retries. (Default: `1.0`)
 
 ## License
 

@@ -30,6 +30,7 @@ def _get_float_env(name: str, default: float, minimum: float | None = None) -> f
         return default
     return parsed_value
 
+
 # Default password if not set in environment
 DEFAULT_PASSWORD = "123456"
 
@@ -59,8 +60,7 @@ FAKE_STREAMING_INTERVAL_SECONDS = float(os.environ.get("FAKE_STREAMING_INTERVAL"
 
 # Upstream 429 retry settings. Retry count means retries after the first attempt.
 UPSTREAM_429_RETRY_COUNT = _get_int_env("UPSTREAM_429_RETRY_COUNT", 3, minimum=0)
-UPSTREAM_429_RETRY_BASE_DELAY_SECONDS = _get_float_env("UPSTREAM_429_RETRY_BASE_DELAY_SECONDS", 1.0, minimum=0.0)
-UPSTREAM_429_RETRY_MAX_DELAY_SECONDS = _get_float_env("UPSTREAM_429_RETRY_MAX_DELAY_SECONDS", 30.0, minimum=0.0)
+UPSTREAM_429_RETRY_INTERVAL_SECONDS = _get_float_env("UPSTREAM_429_RETRY_INTERVAL_SECONDS", 1.0, minimum=0.0)
 
 # URL for the remote JSON file containing model lists
 MODELS_CONFIG_URL = os.environ.get("MODELS_CONFIG_URL", "https://raw.githubusercontent.com/gzzhongqi/vertex2openai/refs/heads/main/vertexModels.json")
