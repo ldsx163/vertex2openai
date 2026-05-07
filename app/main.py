@@ -6,6 +6,7 @@ from auth import get_api_key # Potentially for root endpoint
 from credentials_manager import CredentialManager
 from express_key_manager import ExpressKeyManager
 from vertex_ai_init import init_vertex_ai
+import config as app_config
 
 # Routers
 from routes import models_api
@@ -43,6 +44,12 @@ async def startup_event():
     # Print detailed status
     print(f"INFO: SA credentials loaded: {sa_count}")
     print(f"INFO: Express API keys loaded: {express_keys_count}")
+    print(
+        "INFO: Upstream 429 retry config: "
+        f"count={app_config.UPSTREAM_429_RETRY_COUNT}, "
+        f"fixed_interval_seconds={app_config.UPSTREAM_429_RETRY_INTERVAL_SECONDS}",
+        flush=True
+    )
     print(f"INFO: Total authentication methods available: {(1 if sa_count > 0 else 0) + (1 if express_keys_count > 0 else 0)}")
     
     # Determine overall status

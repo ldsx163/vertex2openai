@@ -137,10 +137,14 @@ def _is_upstream_429_error(exc: Exception) -> bool:
 
 async def _sleep_before_429_retry(exc: Exception, retry_number: int, model_name: str) -> None:
     delay = app_config.UPSTREAM_429_RETRY_INTERVAL_SECONDS
+    now = time.time()
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))
+    timestamp = f"{timestamp}.{int((now % 1) * 1000):03d}"
     print(
-        f"WARNING: Upstream 429 for Gemini model '{model_name}'. "
+        f"WARNING: [{timestamp}] Upstream 429 for Gemini model '{model_name}'. "
         f"Retrying {retry_number}/{app_config.UPSTREAM_429_RETRY_COUNT} "
-        f"after fixed interval {delay:.2f}s."
+        f"after fixed interval {delay:.2f}s.",
+        flush=True
     )
     if delay > 0:
         await asyncio.sleep(delay)
