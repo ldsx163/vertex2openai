@@ -150,6 +150,17 @@ async def _sleep_before_429_retry(exc: Exception, retry_number: int, model_name:
         await asyncio.sleep(delay)
 
 
+def _log_429_retry_recovered(model_name: str, retry_number: int) -> None:
+    if retry_number <= 0:
+        return
+
+    print(
+        f"INFO: Upstream 429 retry recovered for Gemini model '{model_name}' "
+        f"after {retry_number} retry attempt(s).",
+        flush=True
+    )
+
+
 async def _generate_content_with_429_retries(
     gemini_client_instance: Any,
     model_for_api_call: str,
@@ -159,11 +170,13 @@ async def _generate_content_with_429_retries(
     retry_number = 0
     while True:
         try:
-            return await gemini_client_instance.aio.models.generate_content(
+            response = await gemini_client_instance.aio.models.generate_content(
                 model=model_for_api_call,
                 contents=prompt_for_api_call,
                 config=gen_config_dict_for_api_call,
             )
+            _log_429_retry_recovered(model_for_api_call, retry_number)
+            return response
         except Exception as exc:
             if (
                 _is_upstream_429_error(exc)
@@ -517,6 +530,8 @@ async def execute_gemini_call(
                             config=gen_config_dict # Pass the dictionary directly
                         )
                         async for chunk_item_call in stream_gen_obj:
+                            if not has_yielded_any_chunk:
+                                _log_429_retry_recovered(model_to_call, retry_number)
                             has_yielded_any_chunk = True
                             yield convert_chunk_to_openai(chunk_item_call, request_obj.model, response_id_for_stream, 0)
                         yield "data: [DONE]\n\n"
