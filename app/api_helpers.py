@@ -106,6 +106,97 @@ class StreamingReasoningProcessor:
 def create_openai_error_response(status_code: int, message: str, error_type: str) -> Dict[str, Any]:
     return {"error": {"message": message, "type": error_type, "code": status_code, "param": None}}
 
+
+def _get_upstream_status_code(exc: Exception) -> Optional[int]:
+    for attr_name in ("status_code", "code"):
+        attr_value = getattr(exc, attr_name, None)
+        if isinstance(attr_value, int):
+            return attr_value
+        if isinstance(attr_value, str) and attr_value.isdigit():
+            return int(attr_value)
+
+    response = getattr(exc, "response", None)
+    for response_attr_name in ("status_code", "status"):
+        response_status = getattr(response, response_attr_name, None)
+        if isinstance(response_status, int):
+            return response_status
+
+    return None
+
+
+def _get_retry_after_seconds(exc: Exception) -> Optional[float]:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+
+    retry_after = None
+    if hasattr(headers, "get"):
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    if retry_after is None:
+        return None
+
+    try:
+        return max(0.0, float(retry_after))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_upstream_429_error(exc: Exception) -> bool:
+    status_code = _get_upstream_status_code(exc)
+    if status_code == 429:
+        return True
+
+    exc_text = str(exc)
+    return "429" in exc_text and (
+        "Too Many Requests" in exc_text or "RESOURCE_EXHAUSTED" in exc_text
+    )
+
+
+def _get_429_retry_delay(exc: Exception, retry_number: int) -> float:
+    retry_after = _get_retry_after_seconds(exc)
+    max_delay = app_config.UPSTREAM_429_RETRY_MAX_DELAY_SECONDS
+    if retry_after is not None:
+        return min(retry_after, max_delay)
+
+    base_delay = app_config.UPSTREAM_429_RETRY_BASE_DELAY_SECONDS
+    return min(base_delay * (2 ** max(0, retry_number - 1)), max_delay)
+
+
+async def _sleep_before_429_retry(exc: Exception, retry_number: int, model_name: str) -> None:
+    delay = _get_429_retry_delay(exc, retry_number)
+    print(
+        f"WARNING: Upstream 429 for Gemini model '{model_name}'. "
+        f"Retrying {retry_number}/{app_config.UPSTREAM_429_RETRY_COUNT} after {delay:.2f}s."
+    )
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+async def _generate_content_with_429_retries(
+    gemini_client_instance: Any,
+    model_for_api_call: str,
+    prompt_for_api_call: List[types.Content],
+    gen_config_dict_for_api_call: Dict[str, Any],
+):
+    retry_number = 0
+    while True:
+        try:
+            return await gemini_client_instance.aio.models.generate_content(
+                model=model_for_api_call,
+                contents=prompt_for_api_call,
+                config=gen_config_dict_for_api_call,
+            )
+        except Exception as exc:
+            if (
+                _is_upstream_429_error(exc)
+                and retry_number < app_config.UPSTREAM_429_RETRY_COUNT
+            ):
+                retry_number += 1
+                await _sleep_before_429_retry(exc, retry_number, model_for_api_call)
+                continue
+            raise
+
 def create_generation_config(request: OpenAIRequest) -> Dict[str, Any]:
     config: Dict[str, Any] = {}
     
@@ -295,10 +386,11 @@ async def gemini_fake_stream_generator(
     print(f"FAKE STREAMING (Gemini): Prep for '{request_obj.model}' (API model string: '{model_for_api_call}', client obj: '{model_name_for_log}')")
     
     api_call_task = asyncio.create_task(
-        gemini_client_instance.aio.models.generate_content(
-            model=model_for_api_call, 
-            contents=prompt_for_api_call, 
-            config=gen_config_dict_for_api_call # Pass the dictionary directly
+        _generate_content_with_429_retries(
+            gemini_client_instance,
+            model_for_api_call,
+            prompt_for_api_call,
+            gen_config_dict_for_api_call
         )
     )
 
@@ -332,12 +424,13 @@ async def gemini_fake_stream_generator(
         print(f"ERROR: {err_msg_detail}")
         sse_err_msg_display = str(e_outer_gemini)
         if len(sse_err_msg_display) > 512: sse_err_msg_display = sse_err_msg_display[:512] + "..."
-        err_resp_sse = create_openai_error_response(500, sse_err_msg_display, "server_error")
+        status_code = 429 if _is_upstream_429_error(e_outer_gemini) else 500
+        error_type = "rate_limit_error" if status_code == 429 else "server_error"
+        err_resp_sse = create_openai_error_response(status_code, sse_err_msg_display, error_type)
         json_payload_error = json.dumps(err_resp_sse)
-        if not is_auto_attempt:
-            yield f"data: {json_payload_error}\n\n"
-            yield "data: [DONE]\n\n"
-        if is_auto_attempt: raise
+        yield f"data: {json_payload_error}\n\n"
+        yield "data: [DONE]\n\n"
+        return
 
 
 async def openai_fake_stream_generator( 
@@ -437,32 +530,57 @@ async def execute_gemini_call(
         else: # True Streaming
             response_id_for_stream = f"chatcmpl-realstream-{int(time.time())}"
             async def _gemini_real_stream_generator_inner():
-                try:
-                    stream_gen_obj = await current_client.aio.models.generate_content_stream(
-                        model=model_to_call, 
-                        contents=actual_prompt_for_call,
-                        config=gen_config_dict # Pass the dictionary directly
-                    )
-                    async for chunk_item_call in stream_gen_obj:
-                        yield convert_chunk_to_openai(chunk_item_call, request_obj.model, response_id_for_stream, 0)
-                    yield "data: [DONE]\n\n"
-                except Exception as e_stream_call:
-                    err_msg_detail_stream = f"Streaming Error (Gemini API, model string: '{model_to_call}'): {type(e_stream_call).__name__} - {str(e_stream_call)}"
-                    print(f"ERROR: {err_msg_detail_stream}")
-                    s_err = str(e_stream_call); s_err = s_err[:1024]+"..." if len(s_err)>1024 else s_err
-                    err_resp = create_openai_error_response(500,s_err,"server_error")
-                    j_err = json.dumps(err_resp)
-                    if not is_auto_attempt: 
+                retry_number = 0
+                has_yielded_any_chunk = False
+                while True:
+                    try:
+                        stream_gen_obj = await current_client.aio.models.generate_content_stream(
+                            model=model_to_call,
+                            contents=actual_prompt_for_call,
+                            config=gen_config_dict # Pass the dictionary directly
+                        )
+                        async for chunk_item_call in stream_gen_obj:
+                            has_yielded_any_chunk = True
+                            yield convert_chunk_to_openai(chunk_item_call, request_obj.model, response_id_for_stream, 0)
+                        yield "data: [DONE]\n\n"
+                        return
+                    except Exception as e_stream_call:
+                        if (
+                            _is_upstream_429_error(e_stream_call)
+                            and not has_yielded_any_chunk
+                            and retry_number < app_config.UPSTREAM_429_RETRY_COUNT
+                        ):
+                            retry_number += 1
+                            await _sleep_before_429_retry(e_stream_call, retry_number, model_to_call)
+                            continue
+
+                        err_msg_detail_stream = f"Streaming Error (Gemini API, model string: '{model_to_call}'): {type(e_stream_call).__name__} - {str(e_stream_call)}"
+                        print(f"ERROR: {err_msg_detail_stream}")
+                        s_err = str(e_stream_call); s_err = s_err[:1024]+"..." if len(s_err)>1024 else s_err
+                        status_code = 429 if _is_upstream_429_error(e_stream_call) else 500
+                        error_type = "rate_limit_error" if status_code == 429 else "server_error"
+                        err_resp = create_openai_error_response(status_code, s_err, error_type)
+                        j_err = json.dumps(err_resp)
                         yield f"data: {j_err}\n\n"
                         yield "data: [DONE]\n\n"
-                    raise e_stream_call
+                        return
             return StreamingResponse(_gemini_real_stream_generator_inner(), media_type="text/event-stream")
     else: # Non-streaming
-        response_obj_call = await current_client.aio.models.generate_content(
-            model=model_to_call, 
-            contents=actual_prompt_for_call,
-            config=gen_config_dict # Pass the dictionary directly
-        )
+        try:
+            response_obj_call = await _generate_content_with_429_retries(
+                current_client,
+                model_to_call,
+                actual_prompt_for_call,
+                gen_config_dict
+            )
+        except Exception as e_non_stream_call:
+            if _is_upstream_429_error(e_non_stream_call) and not is_auto_attempt:
+                s_err = str(e_non_stream_call); s_err = s_err[:1024]+"..." if len(s_err)>1024 else s_err
+                return JSONResponse(
+                    status_code=429,
+                    content=create_openai_error_response(429, s_err, "rate_limit_error")
+                )
+            raise
         if hasattr(response_obj_call, 'prompt_feedback') and \
            hasattr(response_obj_call.prompt_feedback, 'block_reason') and \
            response_obj_call.prompt_feedback.block_reason:
