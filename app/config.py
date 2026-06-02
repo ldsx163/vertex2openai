@@ -63,7 +63,7 @@ UPSTREAM_429_RETRY_COUNT = _get_int_env("UPSTREAM_429_RETRY_COUNT", 3, minimum=0
 UPSTREAM_429_RETRY_INTERVAL_SECONDS = _get_float_env("UPSTREAM_429_RETRY_INTERVAL_SECONDS", 1.0, minimum=0.0)
 
 # URL for the remote JSON file containing model lists
-MODELS_CONFIG_URL = os.environ.get("MODELS_CONFIG_URL", "https://raw.githubusercontent.com/gzzhongqi/vertex2openai/refs/heads/main/vertexModels.json")
+MODELS_CONFIG_URL = os.environ.get("MODELS_CONFIG_URL", "https://raw.githubusercontent.com/ldsx163/vertex2openai/refs/heads/main/vertexModels.json")
 
 # Constant for the Vertex reasoning tag
 VERTEX_REASONING_TAG = "vertex_think_tag"
@@ -78,3 +78,4 @@ SAFETY_SCORE = os.environ.get("SAFETY_SCORE", "false").lower() == "true"
 # Proxy settings
 PROXY_URL = os.environ.get("PROXY_URL")
 SSL_CERT_FILE = os.environ.get("SSL_CERT_FILE")
+
