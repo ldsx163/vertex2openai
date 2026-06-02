@@ -22,4 +22,6 @@ services:
       - UPSTREAM_429_RETRY_COUNT=3
       # Fixed interval between upstream 429 retries (default: 1.0)
       - UPSTREAM_429_RETRY_INTERVAL_SECONDS=1.0
+      # Remote model list URL
+      - MODELS_CONFIG_URL=https://raw.githubusercontent.com/ldsx163/vertex2openai/refs/heads/main/vertexModels.json
     restart: unless-stopped
